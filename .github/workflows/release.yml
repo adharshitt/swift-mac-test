@@ -1,0 +1,262 @@
+name: Release Build - All Platforms
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ============================================================
+  # macOS Universal Binary (ARM64 + x86_64)
+  # ============================================================
+  build_macos:
+    name: macOS Universal
+    runs-on: macos-14
+    steps:
+    - uses: actions/checkout@v4
+
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Toolchain Cache
+      id: mac-toolchain
+      uses: actions/cache@v4
+      with:
+        path: ~/mac-toolchain
+        key: ${{ runner.os }}-${{ runner.arch }}-toolchain-${{ hashFiles('**/scripts/mac-toolchain-build') }}
+
+    - name: Setup Environment
+      run: |
+        echo ~/mac-toolchain/bin >> $GITHUB_PATH
+        rustup target add x86_64-apple-darwin
+
+    - name: Setup Toolchain
+      if: steps.mac-toolchain.outputs.cache-hit != 'true'
+      run: |
+        pip install setuptools
+        scripts/mac-toolchain-build ~/mac-toolchain
+
+    - name: Setup Cargo-C
+      run: |
+        cargo install cargo-c || true
+
+    - name: Build HandBrake (Universal Binary)
+      run: |
+        ./configure --launch-jobs=0 --launch
+        cd build
+        make ub && make pkg.create
+
+    - name: Prepare macOS artifacts
+      run: |
+        mkdir -p release-assets
+        cp build/pkg/*.dmg release-assets/ 2>/dev/null || true
+        cp build/HandBrakeCLI release-assets/HandBrakeCLI-macos-universal 2>/dev/null || true
+        ls -lh release-assets/
+
+    - name: Upload macOS Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: macos-universal
+        path: release-assets/
+
+  # ============================================================
+  # Windows x64 (CLI + LibHB)
+  # ============================================================
+  build_windows_x64:
+    name: Windows x64
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup Environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y automake autoconf build-essential cmake libtool libtool-bin make meson nasm patch tar zlib1g-dev ninja-build gzip pax mingw-w64 pkg-config
+
+    - name: Build HandBrake
+      run: |
+        ./configure --cross=x86_64-w64-mingw32 --enable-qsv --enable-vce --enable-nvenc --enable-asm --launch-jobs=0 --launch
+
+    - name: Prepare Windows x64 artifacts
+      run: |
+        mkdir -p release-assets
+        cp build/HandBrakeCLI.exe release-assets/HandBrakeCLI-win-x64.exe
+        cp build/libhb/hb.dll release-assets/hb-win-x64.dll
+        ls -lh release-assets/
+
+    - name: Upload Windows x64 Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: windows-x64
+        path: release-assets/
+
+  # ============================================================
+  # Windows ARM64 (CLI + LibHB)
+  # ============================================================
+  build_windows_arm64:
+    name: Windows ARM64
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup Environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y automake autoconf build-essential cmake libtool libtool-bin make meson nasm patch tar zlib1g-dev ninja-build gzip pax pkg-config
+        rustup target add aarch64-pc-windows-gnullvm
+
+    - name: Setup LLVM MinGW Toolchain
+      run: |
+        wget -q https://github.com/HandBrake/HandBrake-toolchains/releases/download/1.0/llvm-mingw-20251216-ucrt-ubuntu-22.04-x86_64.tar.xz
+        mkdir toolchains
+        mv llvm-mingw-20251216-ucrt-ubuntu-22.04-x86_64.tar.xz toolchains/
+        cd toolchains && tar xf llvm-mingw-20251216-ucrt-ubuntu-22.04-x86_64.tar.xz
+
+    - name: Build HandBrake
+      run: |
+        export PATH="${GITHUB_WORKSPACE}/toolchains/llvm-mingw-20251216-ucrt-ubuntu-22.04-x86_64/bin:${PATH}"
+        export PATH=/usr/bin:$PATH
+        ./configure --cross=aarch64-w64-mingw32 --enable-mf --launch-jobs=0 --launch
+
+    - name: Prepare Windows ARM64 artifacts
+      run: |
+        mkdir -p release-assets
+        cp build/HandBrakeCLI.exe release-assets/HandBrakeCLI-win-arm64.exe
+        cp build/libhb/hb.dll release-assets/hb-win-arm64.dll
+        ls -lh release-assets/
+
+    - name: Upload Windows ARM64 Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: windows-arm64
+        path: release-assets/
+
+  # ============================================================
+  # Linux x86_64
+  # ============================================================
+  build_linux_x64:
+    name: Linux x86_64
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup Environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y autoconf automake build-essential cmake libtool libtool-bin make meson nasm patch tar ninja-build pkg-config
+        sudo apt-get install -y libbz2-dev libfontconfig1-dev libfreetype6-dev libfribidi-dev libharfbuzz-dev libjansson-dev liblzma-dev libmp3lame-dev libnuma-dev libturbojpeg0-dev libssl-dev
+        sudo apt-get install -y libogg-dev libopus-dev libspeex-dev libtheora-dev libvorbis-dev libx264-dev libvpx-dev zlib1g-dev libass-dev
+        sudo apt-get install -y libva-dev libdrm-dev
+
+    - name: Build HandBrake
+      run: |
+        ./configure --disable-gtk --enable-qsv --enable-vce --enable-nvenc --enable-asm --launch-jobs=0 --launch
+
+    - name: Prepare Linux x64 artifacts
+      run: |
+        mkdir -p release-assets
+        cp build/HandBrakeCLI release-assets/HandBrakeCLI-linux-x64
+        chmod +x release-assets/HandBrakeCLI-linux-x64
+        ls -lh release-assets/
+
+    - name: Upload Linux x64 Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: linux-x64
+        path: release-assets/
+
+  # ============================================================
+  # Linux ARM64 (cross-compile)
+  # ============================================================
+  build_linux_arm64:
+    name: Linux ARM64
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup Environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y autoconf automake build-essential cmake libtool libtool-bin make meson nasm patch tar ninja-build pkg-config
+        sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+
+    - name: Build HandBrake
+      run: |
+        ./configure --cross=aarch64-linux-gnu --disable-gtk --disable-numa --enable-asm --launch-jobs=0 --launch
+
+    - name: Prepare Linux ARM64 artifacts
+      run: |
+        mkdir -p release-assets
+        cp build/HandBrakeCLI release-assets/HandBrakeCLI-linux-arm64
+        chmod +x release-assets/HandBrakeCLI-linux-arm64
+        ls -lh release-assets/
+
+    - name: Upload Linux ARM64 Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: linux-arm64
+        path: release-assets/
+
+  # ============================================================
+  # Create GitHub Release with ALL binaries
+  # ============================================================
+  create_release:
+    name: Create Release
+    needs: [build_macos, build_windows_x64, build_windows_arm64, build_linux_x64, build_linux_arm64]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: all-artifacts
+
+    - name: Prepare release files
+      run: |
+        mkdir -p release-files
+        find all-artifacts -type f -exec cp {} release-files/ \;
+        echo "=== Release files ==="
+        ls -lh release-files/
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ github.ref_name }}
+        name: "Swift ${{ github.ref_name }} — All Platforms"
+        draft: false
+        prerelease: false
+        generate_release_notes: true
+        files: release-files/*
+        body: |
+          ## Swift ${{ github.ref_name }} — Multi-Platform Release
+
+          ### Downloads
+
+          | Platform | Architecture | File |
+          |----------|-------------|------|
+          | 🍎 macOS | Universal (ARM64 + x86_64) | `HandBrakeCLI-macos-universal` |
+          | 🪟 Windows | x86_64 | `HandBrakeCLI-win-x64.exe` |
+          | 🪟 Windows | ARM64 | `HandBrakeCLI-win-arm64.exe` |
+          | 🐧 Linux | x86_64 | `HandBrakeCLI-linux-x64` |
+          | 🐧 Linux | ARM64 | `HandBrakeCLI-linux-arm64` |
+
+          ### Features
+          - x264, x265, SVT-AV1, FFmpeg, VP9, Theora video encoders
+          - Intel QSV, NVIDIA NVENC, AMD VCE hardware acceleration
+          - DVD/Blu-ray input support (libdvdnav, libbluray)
+          - Statically linked — no extra dependencies required
+
+          ### Usage
+          ```
+          HandBrakeCLI -i input.mkv -o output.mp4 --preset "Fast 1080p30"
+          ```
