@@ -1,0 +1,38 @@
+name: Release Build
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build_macos:
+    name: macOS Universal
+    runs-on: macos-14
+    steps:
+    - uses: actions/checkout@v4
+    - name: Build Placeholder
+      run: echo "Hello"
+    - name: Upload macOS Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: macos-universal
+        path: .github/
+
+  create_release:
+    name: Create Release
+    needs: [build_macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - uses: actions/checkout@v4
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ github.ref_name }}
+        name: "Swift ${{ github.ref_name }} — All Platforms"
+        draft: false
+        prerelease: false
+        generate_release_notes: true
