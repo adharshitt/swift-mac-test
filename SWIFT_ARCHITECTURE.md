@@ -1,136 +1,162 @@
-# Swift Architecture & Task Distribution Reference
+# Swift (HandBrake) Comprehensive Architecture & Task Distribution Reference
 
-This document provides a comprehensive overview of the **Swift** (HandBrake-based) architecture, detailing its file structure, code modules, and task distribution mechanisms (concurrency and thread-level parallelism).
+This reference document provides a detailed layout of the **Swift** video transcoding repository. It catalogs folders, subfolders, and key files, explaining what each component does and how they are linked across the workspace.
 
 ---
 
-## 1. High-Level Directory Structure
+## 1. Directory Tree & Folder Roles
+
+Here is the exact folder structure of the Swift project:
 
 ```
 Swift/
-├── contrib/            # Build instructions and patches for 3rd-party dependencies
-├── gtk/                # Linux GTK user interface source code
-├── macosx/             # macOS native User Interface (Swift/ObjC) source code
-├── win/                # Windows native User Interface (C#/.NET) source code
-├── make/               # Python-based configure and build system scripts
-├── test/               # HandBrakeCLI (test.c) source code and CLI harness
-├── scripts/            # Release, localization, and packaging scripts
-└── libhb/              # Core transcoding engine library (written in C)
-    ├── handbrake/      # Public/Internal API header files (.h)
-    └── platforms/      # OS-specific hardware acceleration modules
+├── contrib/             # 3rd-party dependency build definitions (recipes)
+│   ├── ffmpeg/          # FFmpeg decoder/encoder engine configuration
+│   ├── x264/            # H.264/AVC software encoder recipe
+│   ├── x265/            # H.265/HEVC software encoder recipe
+│   ├── svt-av1/         # SVT-AV1 video encoder recipe
+│   ├── libvpl/          # Intel Video Processing Library (QSV) build recipe
+│   └── [31+ others]     # Libraries like libass, zimg, fribidi, jansson, etc.
+├── gtk/                 # Linux user interface (GTK4/C)
+├── macosx/              # macOS native user interface (Cocoa/ObjC/Swift)
+├── win/                 # Windows native user interface (.NET C#/WPF)
+├── make/                # Python scripts and Makefile templates for build setup
+│   ├── cross/           # Meson configurations for cross-compiling (e.g. MinGW)
+│   ├── include/         # GNU Make definitions for compiler flags, rules, and contribs
+│   └── lib/             # Helper libraries for Python configure scripts
+├── test/                # Command-line interface client (HandBrakeCLI) code
+└── libhb/               # Core transcoding engine library (C)
+    ├── handbrake/       # Header files containing shared definitions and API contracts
+    ├── platform/        # Hardware acceleration adapter files
+    │   └── macosx/      # Apple VideoToolbox and Metal GPU shader adapters
+    └── templates/       # Frame-processing templates for parallel filters
 ```
 
 ---
 
-## 2. Core Task Distribution & Concurrency Model
+## 2. Comprehensive Directory & File Catalog
 
-Swift employs a **hybrid multithreading model** to maximize CPU utilization:
-1. **Pipeline Parallelism (Inter-Module)**: Splitting stages of transcoding (read, decode, sync, filter, encode, mux) into separate threads linked via thread-safe FIFOs.
-2. **Data Parallelism (Intra-Module)**: Splitting CPU-heavy filtering or encoding tasks (e.g., frame slices) across multiple threads using a fork-join worker pool.
+### A. The Build System: `make/`
+This folder handles configuration, system checks, and compiles the Makefile templates.
+- **[`make/configure.py`](file:///home/harshit/Pending/Swift/make/configure.py)**: Main entry point for the build configuration. It runs platform checks (checking compiler versions, tools like `nasm`, `ninja`, `meson`), registers user-facing options (such as `--disable-gtk`, `--enable-qsv`), and outputs the final `./build/GNUmakefile` and configuration headers.
+- **[`make/df-fetch.py`](file:///home/harshit/Pending/Swift/make/df-fetch.py)** / **[`make/df-verify.py`](file:///home/harshit/Pending/Swift/make/df-verify.py)**: Downloader and integrity checker for package source tarballs configured under `contrib/`.
+- **`make/include/` subfiles**:
+  - **`contrib.defs`**: Defines standard compilation recipes and variables for external packages.
+  - **`gcc.defs`**: Sets up compilation/linker arguments (`-O3`, `-mfpmath=sse`, LTO, debug modes). It defines the executable generation commands like `TEST.GCC.EXE++`.
+  - **`main.defs`** / **`main.rules`**: Root variables and targets (`make build`, `make install`) for HandBrake.
 
-```mermaid
-graph TD
-    Input[Input File] --> ReaderThread[Reader Thread: reader.c]
-    
-    subgraph Decoders ["Decoders (Separate Threads)"]
-        ReaderThread -- Packet FIFOs --> VideoDec[Video Decoder: decavcodec.c]
-        ReaderThread -- Packet FIFOs --> AudioDec[Audio Decoder: decavcodec.c]
-    end
-    
-    subgraph Sync ["Synchronization (Separate Thread)"]
-        VideoDec -- Raw FIFOs --> SyncThread[Sync Engine: sync.c]
-        AudioDec -- Raw FIFOs --> SyncThread
-    end
-    
-    subgraph Filters ["Video Filters (Pipelines of Threads)"]
-        SyncThread -- Sync FIFOs --> Filter1[Filter 1 Thread: yadif]
-        Filter1 -- Intermediate FIFOs --> Filter2[Filter 2 Thread: comb_detect]
-        
-        subgraph TasksetPool ["taskset.c Thread Pool (Intra-Filter Slicing)"]
-            Filter2 --> Worker1[Taskset Worker 1]
-            Filter2 --> Worker2[Taskset Worker 2]
-            Filter2 --> Worker3[Taskset Worker 3]
-        end
-    end
-    
-    subgraph Encoders ["Encoders (Separate Threads)"]
-        Filter2 -- Render FIFOs --> VideoEnc[Video Encoder Thread: encx264/encx265]
-        SyncThread -- Render FIFOs --> AudioEnc[Audio Encoder Thread: encavcodec]
-    end
-    
-    VideoEnc -- Encoded FIFOs --> MuxerThread[Muxer Thread: muxavformat.c]
-    AudioEnc -- Encoded FIFOs --> MuxerThread
-    
-    MuxerThread --> Output[Output File: MP4/MKV]
+---
+
+### B. The Command-Line interface: `test/`
+This module compiles into `HandBrakeCLI` and runs user-facing parameters.
+- **[`test/test.c`](file:///home/harshit/Pending/Swift/test/test.c)**: Command line parser and wrapper. It parses input flags (`-i`, `-o`, `--preset`), tracks progress updates, registers event logging callbacks, and fires backend calls like `hb_init` and `hb_start`.
+- **[`test/parsecsv.c`](file:///home/harshit/Pending/Swift/test/parsecsv.c)** / **`parsecsv.h`**: Internal parser for loading batch lists and CSV jobs into transcoder tasks.
+- **`test/module.defs`**: Contains target compiler flags (`TEST.GCC.pkgconfig`) and defines what external dependencies are linked (e.g. `libass`, `SvtAv1Enc`, `dvdnav`).
+
+---
+
+### C. The Core Transcoder Engine: `libhb/`
+
+#### 1. API Headers (`libhb/handbrake/`)
+Provides types, structs, and function prototypes shared across filters, encoders, and the UI.
+- **[`libhb/handbrake/handbrake.h`](file:///home/harshit/Pending/Swift/libhb/handbrake/handbrake.h)**: Declares the main external control APIs: `hb_init()`, `hb_start()`, `hb_stop()`, `hb_close()`.
+- **[`libhb/handbrake/common.h`](file:///home/harshit/Pending/Swift/libhb/handbrake/common.h)**: Defines core internal structures, primarily:
+  - `hb_job_t`: Holds transcode pipeline configs (vcodec, width, frame rate, crop info, filters, audio list).
+  - `hb_buffer_t`: The wrapper for video/audio frames passed through FIFO queues.
+  - `hb_work_object_t`: The base class representing pipeline steps (containing pointers to `init`, `work`, and `close` callbacks).
+- **[`libhb/handbrake/ports.h`](file:///home/harshit/Pending/Swift/libhb/handbrake/ports.h)**: System-level interfaces for OS-neutral functions: thread initialization (`hb_thread_init`), lock primitives (`hb_lock_init`), and condition variables (`hb_cond_init`).
+- **[`libhb/handbrake/taskset.h`](file:///home/harshit/Pending/Swift/libhb/handbrake/taskset.h)**: Declares structures for `taskset_t`, worker arguments, and sync variables used by parallel filters.
+
+#### 2. GPU Hardware Acceleration & Metal (`libhb/platform/macosx/`)
+Contains macOS-specific video encoding/decoding and GPU filters.
+- **`encvt.c`**: VideoToolbox encoder integration (H.264, HEVC, ProRes hardware acceleration).
+- **`comb_detect_vt.m`** / **`deinterlace_vt.m`** / **`rotate_vt.c`**: Hardware-accelerated Apple Metal filters.
+- **`metal_utils.m`**: Utility functions compiling shaders and managing GPU texture buffers.
+
+#### 3. Core Engine Pipeline Files (`libhb/`)
+The main C files that control execution, data queuing, and transcoding algorithms.
+
+* **[`libhb/hb.c`](file:///home/harshit/Pending/Swift/libhb/hb.c)**:
+  - **Role**: Coordinates the overall library state.
+  - **APIs**: Exposes `hb_init()` to initialize dependencies and `hb_start()` to spawn the job orchestrator thread.
+
+* **[`libhb/work.c`](file:///home/harshit/Pending/Swift/libhb/work.c)**:
+  - **Role**: The main job controller. Inside `do_job()`, it checks codec settings, configures filter pipelines, constructs `hb_fifo_t` queues, and instantiates each pipeline task (`hb_work_object_t`) as an independent system thread.
+  - **Execution Loop**: Implements `hb_work_loop()`, which runs continuously for each thread, pulling data from `fifo_in`, calling the codec processing function, and outputting to `fifo_out`.
+
+* **[`libhb/fifo.c`](file:///home/harshit/Pending/Swift/libhb/fifo.c)**:
+  - **Role**: Implements thread-safe ring-buffers (`hb_fifo_t`) that connect pipeline stages.
+  - **APIs**: Exposes `hb_fifo_push()` and `hb_fifo_get()`. When a FIFO queue exceeds its threshold (e.g. `FIFO_SMALL`), the pushing thread is blocked using condition variables. If the FIFO is empty, the consumer thread is blocked.
+
+* **[`libhb/taskset.c`](file:///home/harshit/Pending/Swift/libhb/taskset.c)**:
+  - **Role**: Worker pool manager for parallel video filters.
+  - **Flow**: Spawns $N$ worker threads during `taskset_init()`. In `taskset_cycle()`, it sets a start flag (`begin = 1`) and calls `hb_cond_signal()` to wake the worker threads. Workers call the registered filter functions on their allocated horizontal frame slices and signal `complete_cond` when finished. The calling thread waits until all workers are done before outputting the frame.
+
+* **[`libhb/sync.c`](file:///home/harshit/Pending/Swift/libhb/sync.c)**:
+  - **Role**: Integrates video and audio streams (`WORK_SYNC_VIDEO`). Tracks presentation timestamps (PTS), drop rates, duplicate rates, and maintains frame counters (`common->st_counts`).
+  - **APIs**: Implements the rate calculator `p.rate_avg = 1000.0 * processed_frames / elapsed_time`.
+
+* **[`libhb/ports.c`](file:///home/harshit/Pending/Swift/libhb/ports.c)**:
+  - **Role**: Maps platform-independent wrappers (`hb_thread_init()`, `hb_lock()`) to native OS calls (POSIX threads `pthread_create`/`pthread_mutex_lock` on Linux/macOS and Win32 threads/critical sections on Windows).
+
+* **[`libhb/reader.c`](file:///home/harshit/Pending/Swift/libhb/reader.c)** / **`stream.c`**:
+  - **Role**: Opens the file, extracts streams, and parses container metadata. It runs the input packet loop, distributing demuxed packets to decoder input queues.
+
+* **[`libhb/decavcodec.c`](file:///home/harshit/Pending/Swift/libhb/decavcodec.c)**:
+  - **Role**: Wrapper for FFmpeg decoders. Decodes compressed video/audio packets into raw image surfaces (`AVFrame`) and audio buffers.
+
+* **[`libhb/encx264.c`](file:///home/harshit/Pending/Swift/libhb/encx264.c)** / **`encx265.c`** / **`encsvtav1.c`**:
+  - **Role**: Codec wrappers. They map filter settings to encoder configuration parameters, initialize software encoders (x264, x265, SVT-AV1), and handle multithreading parameters for encoders.
+
+* **[`libhb/muxavformat.c`](file:///home/harshit/Pending/Swift/libhb/muxavformat.c)**:
+  - **Role**: Wraps FFmpeg container writing tools. Integrates encoded packet flows and writes them to the output file (MKV, MP4, WebM).
+
+* **[`libhb/comb_detect.c`](file:///home/harshit/Pending/Swift/libhb/comb_detect.c)** / **`nlmeans.c`** / **`avfilter.c`**:
+  - **Role**: Video filtering filters. They call `taskset_cycle()` in [`libhb/taskset.c`](file:///home/harshit/Pending/Swift/libhb/taskset.c) to parallelize pixel-heavy analysis and filtering algorithms across all CPU threads.
+
+---
+
+## 3. Linkage Matrix (Function and Data Connections)
+
+This matrix maps out which code files import, call, or configure other files in the project:
+
+```
+┌─────────────┐       (1) Spawns work thread        ┌──────────────┐
+│  test/test.c│ ──────────────────────────────────> │  libhb/work.c│
+└──────┬──────┘                                     └──────┬───────┘
+       │                                                   │
+       │ (2) Invokes                                       │ (3) Creates buffers
+       ▼                                                   ▼
+┌─────────────┐                                     ┌──────────────┐
+│  libhb/hb.c │                                     │ libhb/fifo.c │
+└─────────────┘                                     └──────┬───────┘
+                                                           │
+                                                           │ (4) Interfaces via queue
+                                                           ▼
+                                                    ┌──────────────┐
+                                                    │libhb/sync.c  │
+                                                    └──────┬───────┘
+                                                           │
+                                                           │ (5) Loops parallel filter slices
+                                                           ▼
+                                                    ┌──────────────┐
+                                                    │libhb/taskset.│
+                                                    └──────────────┘
 ```
 
-### A. Inter-Module Pipeline Parallelism (FIFOs)
-Transcoding tasks are split into functional blocks called **Work Objects** (`hb_work_object_t`). Each work object runs in its own OS thread.
-- **Thread Lifecycle**: Managed in [libhb/work.c](file:///home/harshit/Pending/Swift/libhb/work.c) via `hb_work_loop` and `filter_loop`.
-- **FIFO Queues (`hb_fifo_t`)**: Defined in [libhb/fifo.c](file:///home/harshit/Pending/Swift/libhb/fifo.c), these are thread-safe ring-buffers using mutexes and condition variables to manage flow control. If a queue fills up, the producer thread blocks; if it is empty, the consumer thread blocks.
+### Detailed Linkage Map:
 
-### B. Intra-Module Data Parallelism (Tasksets)
-For CPU-bound video filters, pipeline parallelism is insufficient. Swift utilizes a custom **Fork-Join Worker Pool** called **Tasksets**:
-- **Taskset Lifecycle**: Defined in [libhb/taskset.c](file:///home/harshit/Pending/Swift/libhb/taskset.c) and header [libhb/handbrake/taskset.h](file:///home/harshit/Pending/Swift/libhb/handbrake/taskset.h).
-- **Execution Mechanism**:
-  1. A filter initializes a taskset (`taskset_init`) spawning $N$ worker threads.
-  2. The worker threads block waiting on a conditional variable `begin_cond`.
-  3. When a frame is received, the filter splits the frame into $N$ horizontal segments (slices) and triggers the workers using `taskset_cycle`.
-  4. Workers process their segments and signal `complete_cond`.
-  5. The calling filter thread blocks on `complete_cond` until all workers finish, then proceeds.
-
----
-
-## 3. Core Files in `libhb/` and Interface Matrix
-
-| File Path | Component | Description | Key Interfacing Files |
-| :--- | :--- | :--- | :--- |
-| [`libhb/hb.c`](file:///home/harshit/Pending/Swift/libhb/hb.c) | **Library Core** | Global initialization, setup, and job queueing. Main entry point for frontend bindings. | Interfaces with `work.c` (spawns the work orchestrator thread) and `preset.c`. |
-| [`libhb/work.c`](file:///home/harshit/Pending/Swift/libhb/work.c) | **Work Orchestrator** | Instantiates work objects, allocates input/output FIFOs, starts pipeline threads, and monitors job progress. | Interfaces with `hb.c` (job caller), `fifo.c` (pipeline queues), and all decoder/encoder modules. |
-| [`libhb/fifo.c`](file:///home/harshit/Pending/Swift/libhb/fifo.c) | **Data Buffers** | Thread-safe FIFO queue implementation with write-blocking and read-blocking flow control. | Utilized by almost all pipeline files, particularly `work.c`, `sync.c`, decoders, and encoders. |
-| [`libhb/taskset.c`](file:///home/harshit/Pending/Swift/libhb/taskset.c) | **Thread Pool** | Thread synchronization framework for parallel frame/slice filtering. | Linked by parallel filters like `comb_detect.c`, `nlmeans.c`, `decomb.c`, and `yadif`. |
-| [`libhb/sync.c`](file:///home/harshit/Pending/Swift/libhb/sync.c) | **Sync Engine** | The Audio/Video sync manager. Matches PTS (Presentation Timestamps), inserts dummy frames, or drops frames. | Receives from decoders (`decavcodec.c`) and outputs to filters (`avfilter.c`) and encoders. |
-| [`libhb/ports.c`](file:///home/harshit/Pending/Swift/libhb/ports.c) | **OS Abstraction** | Implements wrappers for thread creation, mutexes, condition variables, and platform helpers (POSIX vs. Win32). | Included globally; links OS calls to `fifo.c`, `taskset.c`, and thread wrappers. |
-| [`libhb/reader.c`](file:///home/harshit/Pending/Swift/libhb/reader.c) / `stream.c` | **Demuxer** | Opens input files/streams, demuxes tracks, and sends packets to codec-specific FIFO queues. | Interfaces with FFmpeg libraries and feeds packet buffers into `work.c`/`decavcodec.c`. |
-| [`libhb/decavcodec.c`](file:///home/harshit/Pending/Swift/libhb/decavcodec.c) | **Decoder Wrapper** | Configures and runs FFmpeg `libavcodec` decoders for audio and video streams. | Consumes packet FIFOs from `reader.c` and feeds raw frame FIFOs to `sync.c`. |
-| [`libhb/encx264.c`](file:///home/harshit/Pending/Swift/libhb/encx264.c) / `encx265.c` | **Video Encoders** | Wraps `libx264` and `libx265` for H.264/AVC and H.265/HEVC encoding. | Consumes render FIFOs from filters, uses encoder internal threading, and outputs to `muxavformat.c`. |
-| [`libhb/encsvtav1.c`](file:///home/harshit/Pending/Swift/libhb/encsvtav1.c) | **AV1 Encoder** | Integrates SVT-AV1 encoder for AV1 video encoding. | Receives filtered frames, configures SVT-AV1 threading, and outputs to `muxavformat.c`. |
-| [`libhb/muxavformat.c`](file:///home/harshit/Pending/Swift/libhb/muxavformat.c) | **Muxer** | Uses FFmpeg `libavformat` to pack encoded tracks into MP4/MKV/WebM files. | Consumes encoded packet streams from all encoder threads and writes final bytes to disk. |
-
----
-
-## 4. Step-by-Step Code Linkage & Execution Flow
-
-To trace how a transcode job is processed step-by-step through these files:
-
-### Step 1: Initializing the Library
-- The UI (GTK, macOS, Win UI) or the CLI ([`test/test.c`](file:///home/harshit/Pending/Swift/test/test.c)) calls `hb_init()` in [`libhb/hb.c`](file:///home/harshit/Pending/Swift/libhb/hb.c).
-- This initializes the thread primitives, filters, encoders, and hardware decoders via platform abstraction in [`libhb/ports.c`](file:///home/harshit/Pending/Swift/libhb/ports.c).
-
-### Step 2: Job Queueing and Thread Spawning
-- The caller adds jobs and triggers execution by calling `hb_start()`.
-- `hb_start()` spawns the main control thread running `hb_work_init` in [`libhb/work.c`](file:///home/harshit/Pending/Swift/libhb/work.c).
-- `work_func` in `work.c` loops through active jobs and invokes `do_job(job)`.
-
-### Step 3: Pipeline Setup
-- Inside `do_job`, the pipeline of threads is constructed:
-  1. Spawns `WORK_READER` running [`libhb/reader.c`](file:///home/harshit/Pending/Swift/libhb/reader.c).
-  2. Spawns audio/video decoder threads running [`libhb/decavcodec.c`](file:///home/harshit/Pending/Swift/libhb/decavcodec.c).
-  3. Spawns `WORK_SYNC_VIDEO` running [`libhb/sync.c`](file:///home/harshit/Pending/Swift/libhb/sync.c).
-  4. Spawns individual filter threads (e.g., `decomb`, `denoise`) configured in `do_job`'s filter list.
-  5. Spawns encoder threads (e.g., [`libhb/encx264.c`](file:///home/harshit/Pending/Swift/libhb/encx264.c)).
-  6. Spawns `WORK_MUX` running [`libhb/muxavformat.c`](file:///home/harshit/Pending/Swift/libhb/muxavformat.c).
-- Each thread is initialized with input/output [`libhb/fifo.c`](file:///home/harshit/Pending/Swift/libhb/fifo.c) buffer pointers.
-
-### Step 4: The Transcoding Loop
-- **Demuxing**: `reader.c` extracts packets and pushes them into `fifo_in` (for decoders).
-- **Decoding**: `decavcodec.c` pulls packets, decodes them to raw frames, and pushes them into `fifo_raw`.
-- **Syncing**: `sync.c` pulls raw frames, aligns audio and video PTS, and writes synchronized frames to `fifo_sync`.
-- **Filtering**: Filters pull frames from `fifo_sync`. CPU-heavy filters like `comb_detect.c` trigger `taskset_cycle` ([`libhb/taskset.c`](file:///home/harshit/Pending/Swift/libhb/taskset.c)) to parallelize pixel-processing across all cores.
-- **Encoding**: Encoders pull filtered frames from `fifo_render`, compress them, and push packets to `fifo_out`.
-- **Muxing**: `muxavformat.c` pulls compressed packets and writes them to the output container.
-
-### Step 5: Joining Threads and Teardown
-- Once `reader.c` hits EOF, it propagates a special flush/EOF buffer down the FIFO chain.
-- As each step finishes processing and flushes its queues, its work thread terminates.
-- When `muxavformat.c` completes and exits, the orchestrator thread (`do_job`) joins all work threads, frees memory buffers via `hb_fifo_close()`, and reports completion to `hb.c` via `SetWorkStateInfo()`.
+1. **[`test/test.c`](file:///home/harshit/Pending/Swift/test/test.c)** ➔ **[`libhb/hb.c`](file:///home/harshit/Pending/Swift/libhb/hb.c)**:
+   - CLI setup runs `hb_init()` and `hb_start()` inside `hb.c`.
+2. **[`libhb/hb.c`](file:///home/harshit/Pending/Swift/libhb/hb.c)** ➔ **[`libhb/work.c`](file:///home/harshit/Pending/Swift/libhb/work.c)**:
+   - `hb_start()` calls `hb_work_init()` to spawn the job thread (`work_func`), which runs the transcoder.
+3. **[`libhb/work.c`](file:///home/harshit/Pending/Swift/libhb/work.c)** ➔ **[`libhb/fifo.c`](file:///home/harshit/Pending/Swift/libhb/fifo.c)**:
+   - Configures the pipeline. It instantiates the reader, decoder, sync, filter, and encoder threads, linking them together with `hb_fifo_init()`.
+4. **[`libhb/reader.c`](file:///home/harshit/Pending/Swift/libhb/reader.c)** ➔ **[`libhb/decavcodec.c`](file:///home/harshit/Pending/Swift/libhb/decavcodec.c)** ➔ **[`libhb/sync.c`](file:///home/harshit/Pending/Swift/libhb/sync.c)**:
+   - `reader.c` extracts packets, pushing them to the decoder (`decavcodec.c`) via packet queues. The decoder decodes them into raw frames, pushing them into the sync queues of `sync.c`.
+5. **[`libhb/sync.c`](file:///home/harshit/Pending/Swift/libhb/sync.c)** ➔ **`libhb/filters`** (e.g. **[`libhb/comb_detect.c`](file:///home/harshit/Pending/Swift/libhb/comb_detect.c)**):
+   - Once synced, frames are passed to the video filters. High-computational filters leverage `taskset_cycle()` in [`libhb/taskset.c`](file:///home/harshit/Pending/Swift/libhb/taskset.c) to run pixel processing routines in parallel on slice worker threads.
+6. **`libhb/filters`** ➔ **[`libhb/encx264.c`](file:///home/harshit/Pending/Swift/libhb/encx264.c)** ➔ **[`libhb/muxavformat.c`](file:///home/harshit/Pending/Swift/libhb/muxavformat.c)**:
+   - Processed frames are put into the video encoder queue. The encoder compresses them and outputs packets to the muxer queue. `muxavformat.c` writes the packets to the output file container.
+7. **All Threads** ➔ **[`libhb/ports.c`](file:///home/harshit/Pending/Swift/libhb/ports.c)**:
+   - All components utilize mutexes, allocations, and threading hooks defined in `ports.c` to maintain cross-platform compatibility.
