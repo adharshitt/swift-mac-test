@@ -40,7 +40,7 @@ jobs:
 
     - name: Run macOS Fixes Verification Test
       run: |
-        clang -framework CoreFoundation -framework CoreVideo -framework CoreMedia test/real_mac_test.c -o test/real_mac_test
+        clang -framework CoreFoundation -framework CoreVideo -framework CoreMedia -framework CoreGraphics test/real_mac_test.c -o test/real_mac_test
         ./test/real_mac_test
 
     - name: Setup Toolchain
