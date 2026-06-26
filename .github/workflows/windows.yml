@@ -48,7 +48,8 @@ jobs:
     - name: Setup Cargo-C Toolchain
       if: steps.windows-arm-cargo-c-toolchain.outputs.cache-hit != 'true'
       run: |
-        cargo install cargo-c
+        mkdir -p ~/.cargo/bin
+        curl -L https://github.com/lu-zero/cargo-c/releases/latest/download/cargo-c-x86_64-unknown-linux-musl.tar.gz | tar -xz -C ~/.cargo/bin
 
     - name: Build CLI and LibHB
       run: |
@@ -115,7 +116,8 @@ jobs:
     - name: Setup Cargo-C Toolchain
       if: steps.windows-cargo-c-toolchain.outputs.cache-hit != 'true'
       run: |
-        cargo install cargo-c
+        mkdir -p ~/.cargo/bin
+        curl -L https://github.com/lu-zero/cargo-c/releases/latest/download/cargo-c-x86_64-unknown-linux-musl.tar.gz | tar -xz -C ~/.cargo/bin
 
     - name: Build CLI and LibHB
       run: |

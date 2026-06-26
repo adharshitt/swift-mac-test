@@ -52,7 +52,11 @@ jobs:
     - name: Setup Cargo-C Toolchain
       if: steps.mac-cargo-c-toolchain.outputs.cache-hit != 'true'
       run: |
-        cargo install cargo-c
+        mkdir -p ~/.cargo/bin
+        curl -L https://github.com/lu-zero/cargo-c/releases/latest/download/cargo-c-macos.zip -o cargo-c.zip
+        unzip -o cargo-c.zip -d ~/.cargo/bin
+        rm cargo-c.zip
+        chmod +x ~/.cargo/bin/cargo-c*
 
     - name: Build HandBrake
       run: |
