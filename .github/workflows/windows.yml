@@ -48,12 +48,11 @@ jobs:
     - name: Setup Cargo-C Toolchain
       if: steps.windows-arm-cargo-c-toolchain.outputs.cache-hit != 'true'
       run: |
-        mkdir -p ~/.cargo/bin
-        curl -L https://github.com/lu-zero/cargo-c/releases/latest/download/cargo-c-x86_64-unknown-linux-musl.tar.gz | tar -xz -C ~/.cargo/bin
+        cargo install cargo-c
 
     - name: Build CLI and LibHB
       run: |
-        export PATH="${GITHUB_WORKSPACE}/toolchains/llvm-mingw-20251216-ucrt-ubuntu-22.04-x86_64/bin:${PATH}"
+        export PATH="/home/runner/work/HandBrake/HandBrake/toolchains/llvm-mingw-20251216-ucrt-ubuntu-22.04-x86_64/bin:${PATH}"
         export PATH=/usr/bin:$PATH
         ./configure --cross=aarch64-w64-mingw32 --enable-mf --launch-jobs=0 --launch
         cd build
@@ -116,12 +115,11 @@ jobs:
     - name: Setup Cargo-C Toolchain
       if: steps.windows-cargo-c-toolchain.outputs.cache-hit != 'true'
       run: |
-        mkdir -p ~/.cargo/bin
-        curl -L https://github.com/lu-zero/cargo-c/releases/latest/download/cargo-c-x86_64-unknown-linux-musl.tar.gz | tar -xz -C ~/.cargo/bin
+        cargo install cargo-c
 
     - name: Build CLI and LibHB
       run: |
-        export PATH="${GITHUB_WORKSPACE}/toolchains/mingw-w64-toolchain-11.0.1-ucrt-linux-x86_64/mingw-w64-x86_64/bin:${PATH}"
+        export PATH="/home/runner/work/HandBrake/HandBrake/toolchains/mingw-w64-toolchain-11.0.1-ucrt-linux-x86_64/mingw-w64-x86_64/bin:${PATH}"
         export PATH=/usr/bin:$PATH
         ./configure --cross=x86_64-w64-mingw32 --enable-qsv --enable-vce --enable-nvenc --enable-nvdec --launch-jobs=0 --launch
         cd build

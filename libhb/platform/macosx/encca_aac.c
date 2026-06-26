@@ -401,20 +401,44 @@ int encCoreAudioInit(hb_work_object_t *w, hb_job_t *job, enum AAC_MODE mode)
                                   kAudioConverterCompressionMagicCookie,
                                   &tmpsiz, NULL);
     UInt8 *magicCookie = malloc(tmpsiz);
-    if (magicCookie != NULL)
+    if (magicCookie == NULL)
     {
-        AudioConverterGetProperty(pv->converter,
-                                  kAudioConverterCompressionMagicCookie,
-                                  &tmpsiz, magicCookie);
-        // CoreAudio returns a complete ESDS, but we only need
-        // the DecoderSpecific info.
-        UInt8 *buffer = NULL;
-        UInt32 out_size = 0;
-        ReadESDSDescExt(magicCookie, tmpsiz, &buffer, &out_size, 0);
-        hb_set_extradata(w->extradata, buffer, out_size);
+        hb_error("encCoreAudioInit: failed to allocate memory for magic cookie");
+        *job->done_error = HB_ERROR_UNKNOWN;
+        *job->die = 1;
+        return -1;
+    }
+
+    OSStatus cookie_err = AudioConverterGetProperty(pv->converter,
+                                                    kAudioConverterCompressionMagicCookie,
+                                                    &tmpsiz, magicCookie);
+    if (cookie_err != noErr)
+    {
+        hb_error("encCoreAudioInit: failed to retrieve magic cookie");
+        free(magicCookie);
+        *job->done_error = HB_ERROR_UNKNOWN;
+        *job->die = 1;
+        return -1;
+    }
+
+    // CoreAudio returns a complete ESDS, but we only need
+    // the DecoderSpecific info.
+    UInt8 *buffer = NULL;
+    UInt32 out_size = 0;
+    long ret = ReadESDSDescExt(magicCookie, tmpsiz, &buffer, &out_size, 0);
+    if (ret != noErr || buffer == NULL || out_size == 0)
+    {
+        hb_error("encCoreAudioInit: failed to parse ESDS magic cookie / invalid extradata");
         free(buffer);
         free(magicCookie);
+        *job->done_error = HB_ERROR_UNKNOWN;
+        *job->die = 1;
+        return -1;
     }
+
+    hb_set_extradata(w->extradata, buffer, out_size);
+    free(buffer);
+    free(magicCookie);
 
     AudioConverterPrimeInfo primeInfo;
     UInt32 piSize = sizeof(primeInfo);
