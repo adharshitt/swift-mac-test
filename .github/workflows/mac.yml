@@ -52,9 +52,9 @@ jobs:
 
     - name: Build HandBrake
       run: |
-        ./configure
+        ./configure --disable-xcode
         cd build
-        make -j9 cli
+        make -j9
 
     - name: Generate Test Video
       run: |
