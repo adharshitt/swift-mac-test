@@ -27,8 +27,9 @@ long_line_behaviour=1
 long_line_column=72
 
 [files]
-current_page=0
+current_page=1
 FILE_NAME_0=317;Matlab/Octave;0;EUTF-8;1;1;0;%2Fhome%2Fharshit%2FPending%2FSwift%2Flibhb%2Fplatform%2Fmacosx%2Flapsharp_vt.m;0;4
+FILE_NAME_1=0;C;0;EUTF-8;1;1;0;%2Fhome%2Fharshit%2FPending%2FSwift%2Flibhb%2Fencavsub.c;0;4
 
 [VTE]
 last_dir=/root

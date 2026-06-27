@@ -54,10 +54,45 @@ jobs:
       run: |
         ./configure
         cd build
-        make ub && make pkg.create
+        make -j9 cli
 
-    - name: Upload Assets
+    - name: Generate Test Video
+      run: |
+        brew install ffmpeg
+        ffmpeg -y -f lavfi -i testsrc=duration=15:size=1920x1080:rate=60 -c:v h264 test.mp4
+
+    - name: Run Memory Leak Test
+      run: |
+        cd build
+        echo "Starting encoding with VT filters..."
+        
+        # Run in background to sample memory
+        ./HandBrakeCLI -i ../test.mp4 -o out.mp4 -e vt_h264 -q 20 --decomb --hqdn3d --comb-detect --crop 0:0:0:0 &
+        PID=$!
+        
+        echo "Monitoring PID $PID"
+        MAX_MEM=0
+        
+        while ps -p $PID > /dev/null; do
+            MEM=$(ps -o rss= -p $PID || echo 0)
+            if [ -n "$MEM" ] && [ "$MEM" -gt "$MAX_MEM" ]; then
+                MAX_MEM=$MEM
+            fi
+            echo "Current RSS: ${MEM} KB (Max: ${MAX_MEM} KB)"
+            sleep 1
+        done
+        
+        echo "Encoding finished. Max Memory used: ${MAX_MEM} KB"
+        
+        if [ "$MAX_MEM" -gt 300000 ]; then
+            echo "Memory exceeded 300 MB! Possible leak."
+            exit 1
+        fi
+        echo "Memory stable."
+
+    - name: Upload Logs
+      if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: HandBrake-macos
-        path: ./build/pkg
+        name: macos-encode-logs
+        path: ./build/out.mp4
