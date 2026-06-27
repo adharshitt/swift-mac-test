@@ -349,6 +349,13 @@ static hb_buffer_t * filter_frame(hb_filter_private_t *pv, hb_buffer_t *in)
         CVMetalTextureRef src  = hb_metal_create_texture_from_pixbuf(pv->mtl->cache, cv_src, i, channels, format);
         CVMetalTextureRef dest = hb_metal_create_texture_from_pixbuf(pv->mtl->cache, cv_dest, i, channels, format);
 
+        if (src == NULL || dest == NULL)
+        {
+            if (src) CFRelease(src);
+            if (dest) CFRelease(dest);
+            continue;
+        }
+
         id<MTLTexture> tex_src  = CVMetalTextureGetTexture(src);
         id<MTLTexture> tex_dest = CVMetalTextureGetTexture(dest);
 

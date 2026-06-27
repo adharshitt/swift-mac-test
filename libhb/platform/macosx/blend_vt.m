@@ -267,6 +267,10 @@ void blend(hb_blend_private_t *pv, hb_buffer_t *out, hb_buffer_t *overlay, int c
         }
 
         CVMetalTextureRef dest = hb_metal_create_texture_from_pixbuf(pv->mtl->cache, cv_dest, i, channels, format);
+        if (dest == NULL)
+        {
+            continue;
+        }
 
         id<MTLTexture> tex_dest = CVMetalTextureGetTexture(dest);
         call_kernel(pv, tex_dest, i,
